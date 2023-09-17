@@ -7,7 +7,7 @@ Save EXR is mainly just for testing, it doesn't provide any improvement over TIF
 
 ![nodes](https://github.com/spacepxl/ComfyUI-HQ-Image-Save/assets/143970342/c385b4fc-e0cd-49e5-8679-fe7ce54854f3)
 
-Here's an example scatterplot of raw R/G values from a generated image. You can see the tighter packing of values below the 0.5 mark for each axis in the 16-bit version:
+Here's an example scatterplot of raw R/G values from a generated image. You can see the greater variation in values below the 0.5 mark for each axis in the 16-bit version:
 
 ![comparison](https://github.com/spacepxl/ComfyUI-HQ-Image-Save/assets/143970342/5838c51b-1308-41a0-9998-c7749c8e5dc4)
 
