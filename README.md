@@ -33,3 +33,5 @@ pause
 # Known Issues
 
 Image previews don't display correctly in the nodes, although they do auto-expand as if there's an image to show.
+
+No metadata is saved to the images
