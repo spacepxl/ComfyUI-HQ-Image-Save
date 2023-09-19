@@ -10,14 +10,11 @@
 ## Overview
 Save images in TIFF 16 bit and EXR 32 bit formats, and save/load latent images as EXR
 
-Don't expect any massive improvements in visible quality, this only passes through whatever is decoded by the VAE. From my testing there's an improvement in accuracy under the midpoint value per channel (0.5 raw, or ~0.215 gamma corrected), but still far less than what's actually possible within 16-bit depth.
+By default comfyui uses fp16 or bf16 for the VAE, but if you add the `--fp32-vae` CLI argument, VAE Decode will be much more precise, just slightly slower.
 
-![nodes](https://github.com/spacepxl/ComfyUI-HQ-Image-Save/assets/143970342/733fd3fa-ed85-430a-b772-3e84fede1675)
+Scatterplot of raw red/green values, left=PNG, right=TIFF. PNG quantizes the image to 256 possible values per channel (2^8), while the TIFF has 65,536 possible values per channel (2^16)
+![comparison](https://github.com/spacepxl/ComfyUI-HQ-Image-Save/assets/143970342/ce8107a2-31c9-44af-95af-b9ff8d704f7f)
 
-
-Here's an example scatterplot of raw R/G values from a generated image. You can see the greater variation in values below the 0.5 mark for each axis in the 16-bit version:
-
-![comparison](https://github.com/spacepxl/ComfyUI-HQ-Image-Save/assets/143970342/0c12920a-5eae-4de2-83bc-3181fcbbbc64)
 
 For latent EXR viewing purposes, if you want a cheap approximation of RGB values from the four latent channels, use this formula:
 ```
@@ -39,6 +36,9 @@ For example on Windows, run_nvidia_gpu.bat:
 
 ```
 set OPENCV_IO_ENABLE_OPENEXR=1
+
+.\python_embeded\python.exe -s ComfyUI\main.py --windows-standalone-build --fp32-vae
+pause
 ```
 
 ## Known Issues
