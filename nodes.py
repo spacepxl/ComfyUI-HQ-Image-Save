@@ -1,12 +1,14 @@
-import torch
 import os
 import sys
+import copy
 
-#os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
+import cv2 as cv
+import torch
 import imageio
 import numpy as np
-import copy
+
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
 
@@ -58,15 +60,24 @@ class SaveEXR:
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
-        self.prefix_append = ""
+        # self.prefix_append = ""
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": 
-                    {"images": ("IMAGE", ),
-                     "filename_prefix": ("STRING", {"default": "ComfyUI"})},
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
-                }
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "filename_prefix": ("STRING", {"default": "ComfyUI"}),
+                "sRGB_to_linear": ("BOOLEAN", {"default": True}),
+                "version": ("INT", {"default": 1, "min": -1, "max": 999}),
+                "start_frame": ("INT", {"default": 1001, "min": 0, "max": 99999999}),
+                "frame_pad": ("INT", {"default": 4, "min": 1, "max": 8}),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
 
     RETURN_TYPES = ()
     FUNCTION = "save_images"
@@ -75,29 +86,53 @@ class SaveEXR:
 
     CATEGORY = "image"
 
-    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None):
-        filename_prefix += self.prefix_append
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+    def save_images(self, images, filename_prefix, sRGB_to_linear, version, start_frame, frame_pad, prompt=None, extra_pnginfo=None):
+        useabs = os.path.isabs(filename_prefix)
+        if not useabs:
+            full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
-        for image in images:
-            i = image.cpu().numpy()
-            linear = copy.deepcopy(i)
+        
+        linear = images.detach().clone().cpu().numpy().astype(np.float32)
+        if sRGB_to_linear:
+            sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
+        
+        bgr = copy.deepcopy(linear)
+        bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
+        bgr[:,:,:,2] = linear[:,:,:,0]
+        if bgr.shape[-1] > 3:
+            bgr[:,:,:,3] = np.clip(1 - linear[:,:,:,3], 0, 1) # invert alpha
+        
+        if version < 0:
+            ver = ""
+        else:
+            ver = f"_v{version:03}"
+        
+        if useabs:
+            basepath = filename_prefix
+            if os.path.basename(filename_prefix) == "":
+                basename = os.path.basename(os.path.normpath(filename_prefix))
+                basepath = os.path.join(os.path.normpath(filename_prefix) + ver, basename)
+            if not os.path.exists(os.path.dirname(basepath)):
+                os.mkdir(os.path.dirname(basepath))
+        
+        for i in range(linear.shape[0]):
+            if useabs:
+                writepath = basepath + ver + f".{str(start_frame + i).zfill(frame_pad)}.exr"
+            else:
+                file = f"{filename}_{counter:05}_.exr"
+                writepath = os.path.join(full_output_folder, file)
+                counter += 1
             
-            #sRGB -> linear conversion
-            less = i <= 0.04045
-            linear[less] = linear[less] / 12.92
-            linear[~less] = np.power((linear[~less] + 0.055) / 1.055, 2.4)
-            
-            file = f"{filename}_{counter:05}_.exr"
-            imageio.imwrite(os.path.join(full_output_folder, file), linear)
-            #results.append({
-            #    "filename": file,
-            #    "subfolder": subfolder,
-            #    "type": self.type
-            #})
-            counter += 1
+            if os.path.exists(writepath):
+                raise Exception("Path exists already, stopping")
+            cv.imwrite(writepath, bgr[i])
 
         return { "ui": { "images": results } }
+
+def sRGBtoLinear(npArray):
+    less = npArray <= 0.0404482362771082
+    npArray[less] = npArray[less] / 12.92
+    npArray[~less] = np.power((npArray[~less] + 0.055) / 1.055, 2.4)
 
 class SaveLatentEXR:
     def __init__(self):
