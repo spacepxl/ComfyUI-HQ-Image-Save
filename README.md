@@ -1,6 +1,7 @@
 # ComfyUI-HQ-Image-Save
 ## Nodes:
 - Image
+  - Load EXR (Individual file, or batch from folder, with cap/skip/nth controls in the same pattern as VHS load nodes)
   - Save Tiff (RGB 16bpc TIFF, needs update to match SaveEXR functionality)
   - Save EXR (RGB or RGBA 32bpc EXR, with full support for batches and either relative paths in the output folder, or absolute paths with version and frame number formatting, and overwrite protection)
 - Latent
