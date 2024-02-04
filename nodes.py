@@ -1,6 +1,7 @@
 import os
 import sys
 import copy
+import glob
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
@@ -9,13 +10,89 @@ import torch
 import imageio
 import numpy as np
 
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
-
-from comfy.cli_args import args
+# sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
 
 import folder_paths
+from comfy.cli_args import args
 
+
+def sRGBtoLinear(npArray):
+    less = npArray <= 0.0404482362771082
+    npArray[less] = npArray[less] / 12.92
+    npArray[~less] = np.power((npArray[~less] + 0.055) / 1.055, 2.4)
+
+def linearToSRGB(npArray):
+    less = npArray <= 0.0031308
+    npArray[less] = npArray[less] * 12.92
+    npArray[~less] = np.power(npArray[~less], 1/2.4) * 1.055 - 0.055
+
+def load_EXR(filepath, sRGB):
+    image = cv.imread(filepath, cv.IMREAD_UNCHANGED).astype(np.float32)
+    rgb = np.flip(image[:,:,:3], 2).copy()
+    if sRGB:
+        linearToSRGB(rgb)
+        rgb = np.clip(rgb, 0, 1)
+    rgb = torch.unsqueeze(torch.from_numpy(rgb), 0)
+    
+    mask = torch.zeros((1, image.shape[0], image.shape[1]), dtype=torch.float32)
+    if image.shape[2] > 3:
+        mask[0] = torch.from_numpy(np.clip(image[:,:,3], 0, 1))
+    
+    return (rgb, mask)
+
+class LoadEXR:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "filepath": ("STRING", {"default": "path to directory or .exr file"}),
+                "linear_to_sRGB": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
+                "image_load_cap": ("INT", {"default": 0, "min": 0, "step": 1}),
+                "skip_first_images": ("INT", {"default": 0, "min": 0, "step": 1}),
+                "select_every_nth": ("INT", {"default": 1, "min": 1, "step": 1}),
+            }
+        }
+
+    CATEGORY = "image"
+
+    RETURN_TYPES = ("IMAGE", "MASK", "INT")
+    RETURN_NAMES = ("RGB", "alpha", "batch_size")
+    FUNCTION = "load"
+
+    def load(self, filepath, linear_to_sRGB=True, image_load_cap=0, skip_first_images=0, select_every_nth=1):
+        p = os.path.normpath(filepath.replace('\"', '').strip())
+        if not os.path.exists(p):
+            raise Exception("Path not found: " + p)
+        
+        if os.path.isfile(p) and os.path.splitext(p)[1].lower() == ".exr":
+            rgb, mask = load_EXR(p, linear_to_sRGB)
+            batch_size = 1
+        else:
+            rgb = []
+            mask = []
+            filelist = sorted(glob.glob(os.path.join(p, "*.exr")))
+            if not filelist:
+                filelist = sorted(glob.glob(os.path.join(p, "*.EXR")))
+                if not filelist:
+                    raise Exception("No EXRs found in folder")
+            
+            filelist = filelist[skip_first_images::select_every_nth]
+            if image_load_cap > 0:
+                cap = min(len(filelist), image_load_cap)
+                filelist = filelist[:cap]
+            batch_size = len(filelist)
+            
+            for file in filelist:
+                rgbFrame, maskFrame = load_EXR(file, linear_to_sRGB)
+                rgb.append(rgbFrame)
+                mask.append(maskFrame)
+            
+            rgb = torch.cat(rgb, 0)
+            mask = torch.cat(mask, 0)
+        
+        return (rgb, mask, batch_size)
 
 class SaveTiff:
     def __init__(self):
@@ -124,15 +201,10 @@ class SaveEXR:
                 counter += 1
             
             if os.path.exists(writepath):
-                raise Exception("Path exists already, stopping")
+                raise Exception("File exists already, stopping to avoid overwriting")
             cv.imwrite(writepath, bgr[i])
 
         return { "ui": { "images": results } }
-
-def sRGBtoLinear(npArray):
-    less = npArray <= 0.0404482362771082
-    npArray[less] = npArray[less] / 12.92
-    npArray[~less] = np.power((npArray[~less] + 0.055) / 1.055, 2.4)
 
 class SaveLatentEXR:
     def __init__(self):
@@ -210,6 +282,7 @@ class LoadLatentEXR:
         return True
 
 NODE_CLASS_MAPPINGS = {
+    "LoadEXR": LoadEXR,
     "SaveTiff": SaveTiff,
     "SaveEXR": SaveEXR,
     "SaveLatentEXR": SaveLatentEXR,
@@ -217,6 +290,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "LoadEXR": "Load EXR",
     "SaveTiff": "Save Tiff",
     "SaveEXR": "Save EXR",
     "SaveLatentEXR": "Save Latent EXR",
