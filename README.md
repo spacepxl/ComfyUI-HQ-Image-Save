@@ -2,14 +2,14 @@
 ## Nodes:
 - Image
   - Load EXR (Individual file, or batch from folder, with cap/skip/nth controls in the same pattern as VHS load nodes)
-  - Save Tiff (RGB 16bpc TIFF, needs update to match SaveEXR functionality)
   - Save EXR (RGB or RGBA 32bpc EXR, with full support for batches and either relative paths in the output folder, or absolute paths with version and frame number formatting, and overwrite protection)
+  - Save Tiff (RGB 16bpc TIFF, needs update to match SaveEXR functionality)
 - Latent
+  - Load Latent EXR (Same VHS style controls now)
   - Save Latent EXR (4 channel latent -> RGBA 32bpc EXR)
-  - Load Latent EXR (images must be in the ComfyUI/input directory)
 
 ## Overview
-Save images in TIFF 16 bit and EXR 32 bit formats, and save/load latent images as EXR
+Save and load images and latents as 32bit EXRs
 
 Recommend adding the `--fp32-vae` CLI argument for more accurate decoding.
 
@@ -26,6 +26,5 @@ b = (0.208 * r + 0.173 * g + 0.264 * b - 0.473 * a) * 0.18215
 
 ## Known Issues
 
-- No workflow metadata is saved to the TIFF or EXR images (TODO: option to autosave .json?)
-- WIP on most nodes
-- Need to add Load TIFF/EXR nodes
+- No workflow metadata is saved to the TIFF or EXR images
+- No load TIFF node yet
