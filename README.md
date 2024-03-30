@@ -28,3 +28,11 @@ b = (0.208 * r + 0.173 * g + 0.264 * b - 0.473 * a) * 0.18215
 
 - No workflow metadata is saved to the TIFF or EXR images
 - No load TIFF node yet
+
+If you get this error `OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option.` To fix it, you need to set an environment variable. The nodes.py should be setting it automatically, but if not, you can manually add it to your ComfyUI startup script.
+
+On windows, run_nvidia_gpu.bat (etc) add this line at the top of the batch script:  
+`set OPENCV_IO_ENABLE_OPENEXR=1`
+
+On linux, it should be:  
+`export OPENCV_IO_ENABLE_OPENEXR=value` (untested)
