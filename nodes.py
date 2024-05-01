@@ -103,6 +103,62 @@ class LoadEXR:
         
         return (rgb, mask, batch_size)
 
+class LoadEXRFrames:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "filepath": ("STRING", {"default": "path/to/frame%04d.exr"}),
+                "linear_to_sRGB": ("BOOLEAN", {"default": True}),
+                "start_frame": ("INT", {"default": 1001, "min": 0, "max": 9999}),
+                "end_frame": ("INT", {"default": 1001, "min": 0, "max": 9999}),
+            },
+        }
+
+    CATEGORY = "image"
+
+    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT")
+    RETURN_NAMES = ("RGB", "alpha", "batch_size", "start_frame")
+    FUNCTION = "load"
+
+    def load(self, filepath, linear_to_sRGB=True, start_frame=1001, end_frame=1001):
+        if os.path.splitext(os.path.normpath(filepath))[1].lower() != ".exr":
+            raise Exception("Filepath needs to end in .exr or .EXR")
+        
+        frames = list(range(start_frame, end_frame+1))
+        if len(frames) == 0:
+            raise Exception("Invalid frame range")
+        
+        if os.path.exists(os.path.normpath(filepath)): # absolute mode
+            rgb, mask = load_EXR(os.path.normpath(filepath), linear_to_sRGB)
+            batch_size = 1
+        elif "%04d" in filepath: # frame substitution
+            rgb = []
+            mask = []
+            batch_size = len(frames)
+            
+            if PROGRESS_BAR_ENABLED and batch_size > 1:
+                pbar = ProgressBar(batch_size)
+            else:
+                pbar = None
+            
+            for frame in tqdm(frames, desc="loading images"):
+                framepath = os.path.normpath(filepath.replace("%04d", f"{frame:04}"))
+                if os.path.exists(framepath):
+                    rgbFrame, maskFrame = load_EXR(framepath, linear_to_sRGB)
+                    rgb.append(rgbFrame)
+                    mask.append(maskFrame)
+                else:
+                    raise Exception("Frame not found: " + framepath)
+                if pbar is not None:
+                    pbar.update(1)
+            rgb = torch.cat(rgb, 0)
+            mask = torch.cat(mask, 0)
+        else:
+            raise Exception("Path not found: " + filepath)
+        
+        return (rgb, mask, batch_size, start_frame)
+
 class SaveEXR:
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
@@ -180,6 +236,82 @@ class SaveEXR:
             cv.imwrite(writepath, bgr[i])
             if pbar is not None:
                 pbar.update(1)
+
+        return { "ui": { "images": results } }
+
+def safe_write_exr(writepath, overwrite, img):
+    if os.path.exists(writepath):
+        if overwrite:
+            cv.imwrite(writepath, img)
+        else:
+            print(f"File {writepath} exists, skipping to avoid overwriting")
+    else:
+        cv.imwrite(writepath, img)
+
+class SaveEXRFrames:
+    def __init__(self):
+        self.type = "output"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "filepath": ("STRING", {"default": "path/to/frame%04d.exr"}),
+                "sRGB_to_linear": ("BOOLEAN", {"default": True}),
+                "start_frame": ("INT", {"default": 1001, "min": 0, "max": 9999}),
+                "overwrite": ("BOOLEAN", {"default": True}),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "save_images"
+
+    OUTPUT_NODE = True
+
+    CATEGORY = "image"
+
+    def save_images(self, images, filepath, sRGB_to_linear, start_frame, overwrite, prompt=None, extra_pnginfo=None):
+        if os.path.splitext(os.path.normpath(filepath))[1].lower() != ".exr":
+            raise Exception("Filepath needs to end in .exr or .EXR")
+        
+        if os.path.isabs(os.path.dirname(os.path.normpath(filepath))):
+            os.makedirs(os.path.dirname(os.path.normpath(filepath)), exist_ok=True)
+        else:
+            raise Exception("Invalid filepath")
+        
+        results = list()
+        
+        linear = images.detach().clone().cpu().numpy().astype(np.float32)
+        if sRGB_to_linear:
+            sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
+        
+        bgr = copy.deepcopy(linear)
+        bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
+        bgr[:,:,:,2] = linear[:,:,:,0]
+        if bgr.shape[-1] > 3:
+            bgr[:,:,:,3] = np.clip(1 - linear[:,:,:,3], 0, 1) # invert alpha
+        
+        if "%04d" not in filepath: # write first frame only
+            writepath = os.path.normpath(filepath)
+            safe_write_exr(writepath, overwrite, bgr[0])
+        else:
+            batch_size = bgr.shape[0]
+            
+            if PROGRESS_BAR_ENABLED and batch_size > 1:
+                pbar = ProgressBar(batch_size)
+            else:
+                pbar = None
+            
+            for i in trange(batch_size, desc="saving images"):
+                writepath = os.path.normpath(filepath.replace("%04d", f"{start_frame + i:04}"))
+                safe_write_exr(writepath, overwrite, bgr[i])
+                if pbar is not None:
+                    pbar.update(1)
 
         return { "ui": { "images": results } }
 
@@ -356,7 +488,9 @@ class SaveLatentEXR:
 
 NODE_CLASS_MAPPINGS = {
     "LoadEXR": LoadEXR,
+    "LoadEXRFrames": LoadEXRFrames,
     "SaveEXR": SaveEXR,
+    "SaveEXRFrames": SaveEXRFrames,
     "SaveTiff": SaveTiff,
     "LoadLatentEXR": LoadLatentEXR,
     "SaveLatentEXR": SaveLatentEXR,
@@ -364,7 +498,9 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadEXR": "Load EXR",
+    "LoadEXRFrames": "Load EXR Frames",
     "SaveEXR": "Save EXR",
+    "SaveEXRFrames": "Save EXR Frames",
     "SaveTiff": "Save Tiff",
     "LoadLatentEXR": "Load Latent EXR",
     "SaveLatentEXR": "Save Latent EXR",
