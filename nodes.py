@@ -1,5 +1,4 @@
 import os
-import copy
 import glob
 from tqdm import tqdm, trange
 
@@ -195,11 +194,11 @@ class SaveEXR:
             full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
         
-        linear = images.detach().clone().cpu().numpy().astype(np.float32)
+        linear = images.cpu().numpy().astype(np.float32)
         if sRGB_to_linear:
             sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
         
-        bgr = copy.deepcopy(linear)
+        bgr = linear.copy()
         bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
         bgr[:,:,:,2] = linear[:,:,:,0]
         if bgr.shape[-1] > 3:
@@ -286,11 +285,11 @@ class SaveEXRFrames:
         
         results = list()
         
-        linear = images.detach().clone().cpu().numpy().astype(np.float32)
+        linear = images.cpu().numpy().astype(np.float32)
         if sRGB_to_linear:
             sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
         
-        bgr = copy.deepcopy(linear)
+        bgr = linear.copy()
         bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
         bgr[:,:,:,2] = linear[:,:,:,0]
         if bgr.shape[-1] > 3:
@@ -442,7 +441,7 @@ class SaveLatentEXR:
     def save_images(self, samples, filename_prefix, version, start_frame, frame_pad, prompt=None, extra_pnginfo=None):
         useabs = os.path.isabs(filename_prefix)
         linear = torch.movedim(samples["samples"], 1, -1)
-        linear = linear.detach().clone().cpu().numpy().astype(np.float32)
+        linear = linear.cpu().numpy().astype(np.float32)
         
         if not useabs:
             full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, linear[0].shape[1], linear[0].shape[0])
