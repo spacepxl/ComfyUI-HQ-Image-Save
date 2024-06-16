@@ -1,6 +1,7 @@
 import os
 import glob
 from tqdm import tqdm, trange
+import json
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
@@ -43,6 +44,16 @@ def load_EXR_latent(filepath):
     image = torch.unsqueeze(torch.from_numpy(image), 0)
     image = torch.movedim(image, -1, 1)
     return (image)
+
+def write_workflow(exr_path, prompt=None, extra_pnginfo=None):
+    jsonpath = exr_path.rsplit(".", 1)[0]
+    if prompt is not None:
+        with open(jsonpath + "_api.json", "w") as f:
+            f.write(json.dumps(prompt, indent=2))
+    if extra_pnginfo is not None:
+        with open(jsonpath + "_ui.json", "w") as f:
+            for x in extra_pnginfo:
+                f.write(json.dumps(extra_pnginfo[x], indent=2))
 
 class LoadEXR:
     @classmethod
@@ -162,7 +173,6 @@ class SaveEXR:
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
-        # self.prefix_append = ""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -174,6 +184,7 @@ class SaveEXR:
                 "version": ("INT", {"default": 1, "min": -1, "max": 999}),
                 "start_frame": ("INT", {"default": 1001, "min": 0, "max": 99999999}),
                 "frame_pad": ("INT", {"default": 4, "min": 1, "max": 8}),
+                "save_workflow": (["ui", "api", "ui + api", "none"],),
             },
             "hidden": {
                 "prompt": "PROMPT",
@@ -188,7 +199,7 @@ class SaveEXR:
 
     CATEGORY = "image"
 
-    def save_images(self, images, filename_prefix, sRGB_to_linear, version, start_frame, frame_pad, prompt=None, extra_pnginfo=None):
+    def save_images(self, images, filename_prefix, sRGB_to_linear, version, start_frame, frame_pad, save_workflow, prompt=None, extra_pnginfo=None):
         useabs = os.path.isabs(filename_prefix)
         if not useabs:
             full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
@@ -233,6 +244,12 @@ class SaveEXR:
             if os.path.exists(writepath):
                 raise Exception("File exists already, stopping to avoid overwriting")
             cv.imwrite(writepath, bgr[i])
+            
+            if i < 1 and save_workflow != "none":
+                api_json = prompt if "api" in save_workflow else None
+                ui_json = extra_pnginfo if "ui" in save_workflow else None
+                write_workflow(writepath, prompt=api_json, extra_pnginfo=ui_json)
+            
             if pbar is not None:
                 pbar.update(1)
 
@@ -260,6 +277,7 @@ class SaveEXRFrames:
                 "sRGB_to_linear": ("BOOLEAN", {"default": True}),
                 "start_frame": ("INT", {"default": 1001, "min": 0, "max": 9999}),
                 "overwrite": ("BOOLEAN", {"default": True}),
+                "save_workflow": (["ui", "api", "ui + api", "none"],),
             },
             "hidden": {
                 "prompt": "PROMPT",
@@ -274,7 +292,7 @@ class SaveEXRFrames:
 
     CATEGORY = "image"
 
-    def save_images(self, images, filepath, sRGB_to_linear, start_frame, overwrite, prompt=None, extra_pnginfo=None):
+    def save_images(self, images, filepath, sRGB_to_linear, start_frame, overwrite, save_workflow, prompt=None, extra_pnginfo=None):
         if os.path.splitext(os.path.normpath(filepath))[1].lower() != ".exr":
             raise Exception("Filepath needs to end in .exr or .EXR")
         
@@ -295,9 +313,15 @@ class SaveEXRFrames:
         if bgr.shape[-1] > 3:
             bgr[:,:,:,3] = np.clip(1 - linear[:,:,:,3], 0, 1) # invert alpha
         
+        api_json = prompt if "api" in save_workflow else None
+        ui_json = extra_pnginfo if "ui" in save_workflow else None
+        
         if "%04d" not in filepath: # write first frame only
             writepath = os.path.normpath(filepath)
             safe_write_exr(writepath, overwrite, bgr[0])
+            
+            if save_workflow != "none":
+                write_workflow(writepath, prompt=api_json, extra_pnginfo=ui_json)
         else:
             batch_size = bgr.shape[0]
             
@@ -309,6 +333,10 @@ class SaveEXRFrames:
             for i in trange(batch_size, desc="saving images"):
                 writepath = os.path.normpath(filepath.replace("%04d", f"{start_frame + i:04}"))
                 safe_write_exr(writepath, overwrite, bgr[i])
+                
+                if i < 1 and save_workflow != "none":
+                    write_workflow(writepath, prompt=api_json, extra_pnginfo=ui_json)
+                
                 if pbar is not None:
                     pbar.update(1)
 
