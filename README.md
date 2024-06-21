@@ -2,8 +2,10 @@
 ## Nodes:
 - Image
   - Load EXR (Individual file, or batch from folder, with cap/skip/nth controls in the same pattern as VHS load nodes)
+  - Load EXR Frames (frame sequence with start/end frames, %04d frame formatting for filenames)
   - Save EXR (RGB or RGBA 32bpc EXR, with full support for batches and either relative paths in the output folder, or absolute paths with version and frame number formatting, and overwrite protection)
-  - Save Tiff (RGB 16bpc TIFF, needs update to match SaveEXR functionality)
+  - Save EXR Frames (frame sequence with %04d formatting, optionally save workflow as GUI .json and/or API .json)
+  - Save Tiff (RGB 16bpc TIFF, outdated)
 - Latent
   - Load Latent EXR (Same VHS style controls now)
   - Save Latent EXR (4 channel latent -> RGBA 32bpc EXR)
@@ -13,7 +15,7 @@ Save and load images and latents as 32bit EXRs
 
 Recommend adding the `--fp32-vae` CLI argument for more accurate decoding.
 
-Scatterplot of raw red/green values, left=PNG, right=TIFF. PNG quantizes the image to 256 possible values per channel (2^8), while the TIFF has 65,536 possible values per channel (2^16)
+Scatterplot of raw red/green values, left=PNG, right=EXR. PNG quantizes the image to 256 possible values per channel (2^8), while the EXR has full floating point precision.
 
 ![comparison](https://github.com/spacepxl/ComfyUI-HQ-Image-Save/assets/143970342/ce8107a2-31c9-44af-95af-b9ff8d704f7f)
 
@@ -26,13 +28,4 @@ b = (0.208 * r + 0.173 * g + 0.264 * b - 0.473 * a) * 0.18215
 
 ## Known Issues
 
-- No workflow metadata is saved to the TIFF or EXR images
-- No load TIFF node yet
-
-If you get this error `OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option.` To fix it, you need to set an environment variable. The nodes.py should be setting it automatically, but if not, you can manually add it to your ComfyUI startup script.
-
-On windows, run_nvidia_gpu.bat (etc) add this line at the top of the batch script:  
-`set OPENCV_IO_ENABLE_OPENEXR=1`
-
-On linux, it should be:  
-`export OPENCV_IO_ENABLE_OPENEXR=value` (untested)
+- No load TIFF node, and the TIFF save is bad/outdated
