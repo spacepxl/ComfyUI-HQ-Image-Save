@@ -13,7 +13,7 @@
 ## Overview
 Save and load images and latents as 32bit EXRs
 
-Recommend adding the `--fp32-vae` CLI argument for more accurate decoding.
+I recommend adding the `--fp32-vae` CLI argument for more accurate decoding. If you get an error saying that the OpenEXR codec is disabled, see [this issue.](https://github.com/spacepxl/ComfyUI-HQ-Image-Save/issues/8)
 
 Scatterplot of raw red/green values, left=PNG, right=EXR. PNG quantizes the image to 256 possible values per channel (2^8), while the EXR has full floating point precision.
 
