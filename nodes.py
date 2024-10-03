@@ -26,6 +26,8 @@ def linearToSRGB(npArray):
 
 def load_EXR(filepath, sRGB):
     image = cv.imread(filepath, cv.IMREAD_UNCHANGED).astype(np.float32)
+    if len(image.shape) == 2:
+        image = np.repeat(image[..., np.newaxis], 3, axis=2)
     rgb = np.flip(image[:,:,:3], 2).copy()
     if sRGB:
         linearToSRGB(rgb)
