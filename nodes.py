@@ -24,14 +24,20 @@ def linearToSRGB(npArray):
     npArray[less] = npArray[less] * 12.92
     npArray[~less] = np.power(npArray[~less], 1/2.4) * 1.055 - 0.055
 
-def load_EXR(filepath, sRGB):
+def load_EXR(filepath, tonemap):
     image = cv.imread(filepath, cv.IMREAD_UNCHANGED).astype(np.float32)
     if len(image.shape) == 2:
         image = np.repeat(image[..., np.newaxis], 3, axis=2)
     rgb = np.flip(image[:,:,:3], 2).copy()
-    if sRGB:
+    
+    if tonemap == "sRGB":
         linearToSRGB(rgb)
         rgb = np.clip(rgb, 0, 1)
+    elif tonemap == "Reinhard":
+        rgb = rgb / (rgb + 1)
+        linearToSRGB(rgb)
+        rgb = np.clip(rgb, 0, 1)
+    
     rgb = torch.unsqueeze(torch.from_numpy(rgb), 0)
     
     mask = torch.zeros((1, image.shape[0], image.shape[1]), dtype=torch.float32)
@@ -63,7 +69,7 @@ class LoadEXR:
         return {
             "required": {
                 "filepath": ("STRING", {"default": "path to directory or .exr file"}),
-                "linear_to_sRGB": ("BOOLEAN", {"default": True}),
+                "tonemap": (["linear", "sRGB", "Reinhard"], {"default": "sRGB"}),
             },
             "optional": {
                 "image_load_cap": ("INT", {"default": 0, "min": 0, "step": 1}),
@@ -78,13 +84,13 @@ class LoadEXR:
     RETURN_NAMES = ("RGB", "alpha", "batch_size")
     FUNCTION = "load"
 
-    def load(self, filepath, linear_to_sRGB=True, image_load_cap=0, skip_first_images=0, select_every_nth=1):
+    def load(self, filepath, tonemap, image_load_cap, skip_first_images, select_every_nth):
         p = os.path.normpath(filepath.replace('\"', '').strip())
         if not os.path.exists(p):
             raise Exception("Path not found: " + p)
         
         if os.path.isfile(p) and os.path.splitext(p)[1].lower() == ".exr":
-            rgb, mask = load_EXR(p, linear_to_sRGB)
+            rgb, mask = load_EXR(p, tonemap)
             batch_size = 1
         else:
             rgb = []
@@ -104,7 +110,7 @@ class LoadEXR:
             if PROGRESS_BAR_ENABLED:
                 pbar = ProgressBar(batch_size)
             for file in tqdm(filelist, desc="loading images"):
-                rgbFrame, maskFrame = load_EXR(file, linear_to_sRGB)
+                rgbFrame, maskFrame = load_EXR(file, tonemap)
                 rgb.append(rgbFrame)
                 mask.append(maskFrame)
                 if PROGRESS_BAR_ENABLED:
@@ -121,7 +127,7 @@ class LoadEXRFrames:
         return {
             "required": {
                 "filepath": ("STRING", {"default": "path/to/frame%04d.exr"}),
-                "linear_to_sRGB": ("BOOLEAN", {"default": True}),
+                "tonemap": (["linear", "sRGB", "Reinhard"], {"default": "sRGB"}),
                 "start_frame": ("INT", {"default": 1001, "min": 0, "max": 9999}),
                 "end_frame": ("INT", {"default": 1001, "min": 0, "max": 9999}),
             },
@@ -133,7 +139,7 @@ class LoadEXRFrames:
     RETURN_NAMES = ("RGB", "alpha", "batch_size", "start_frame")
     FUNCTION = "load"
 
-    def load(self, filepath, linear_to_sRGB=True, start_frame=1001, end_frame=1001):
+    def load(self, filepath, tonemap, start_frame, end_frame):
         if os.path.splitext(os.path.normpath(filepath))[1].lower() != ".exr":
             raise Exception("Filepath needs to end in .exr or .EXR")
         
@@ -142,7 +148,7 @@ class LoadEXRFrames:
             raise Exception("Invalid frame range")
         
         if os.path.exists(os.path.normpath(filepath)): # absolute mode
-            rgb, mask = load_EXR(os.path.normpath(filepath), linear_to_sRGB)
+            rgb, mask = load_EXR(os.path.normpath(filepath), tonemap)
             batch_size = 1
         elif "%04d" in filepath: # frame substitution
             rgb = []
@@ -157,7 +163,7 @@ class LoadEXRFrames:
             for frame in tqdm(frames, desc="loading images"):
                 framepath = os.path.normpath(filepath.replace("%04d", f"{frame:04}"))
                 if os.path.exists(framepath):
-                    rgbFrame, maskFrame = load_EXR(framepath, linear_to_sRGB)
+                    rgbFrame, maskFrame = load_EXR(framepath, tonemap)
                     rgb.append(rgbFrame)
                     mask.append(maskFrame)
                 else:
@@ -182,7 +188,7 @@ class SaveEXR:
             "required": {
                 "images": ("IMAGE",),
                 "filename_prefix": ("STRING", {"default": "ComfyUI"}),
-                "sRGB_to_linear": ("BOOLEAN", {"default": True}),
+                "tonemap": (["linear", "sRGB", "Reinhard"], {"default": "sRGB"}),
                 "version": ("INT", {"default": 1, "min": -1, "max": 999}),
                 "start_frame": ("INT", {"default": 1001, "min": 0, "max": 99999999}),
                 "frame_pad": ("INT", {"default": 4, "min": 1, "max": 8}),
@@ -201,15 +207,17 @@ class SaveEXR:
 
     CATEGORY = "image"
 
-    def save_images(self, images, filename_prefix, sRGB_to_linear, version, start_frame, frame_pad, save_workflow, prompt=None, extra_pnginfo=None):
+    def save_images(self, images, filename_prefix, tonemap, version, start_frame, frame_pad, save_workflow, prompt=None, extra_pnginfo=None):
         useabs = os.path.isabs(filename_prefix)
         if not useabs:
             full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
         
         linear = images.cpu().numpy().astype(np.float32)
-        if sRGB_to_linear:
+        if tonemap != "linear":
             sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
+        if tonemap == "Reinhard":
+            linear[:,:,:,:3] = -linear[:,:,:,:3] / (linear[:,:,:,:3] - 1)
         
         bgr = linear.copy()
         bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
@@ -276,7 +284,7 @@ class SaveEXRFrames:
             "required": {
                 "images": ("IMAGE",),
                 "filepath": ("STRING", {"default": "path/to/frame%04d.exr"}),
-                "sRGB_to_linear": ("BOOLEAN", {"default": True}),
+                "tonemap": (["linear", "sRGB", "Reinhard"], {"default": "sRGB"}),
                 "start_frame": ("INT", {"default": 1001, "min": 0, "max": 9999}),
                 "overwrite": ("BOOLEAN", {"default": True}),
                 "save_workflow": (["ui", "api", "ui + api", "none"],),
@@ -294,7 +302,7 @@ class SaveEXRFrames:
 
     CATEGORY = "image"
 
-    def save_images(self, images, filepath, sRGB_to_linear, start_frame, overwrite, save_workflow, prompt=None, extra_pnginfo=None):
+    def save_images(self, images, filepath, tonemap, start_frame, overwrite, save_workflow, prompt=None, extra_pnginfo=None):
         if os.path.splitext(os.path.normpath(filepath))[1].lower() != ".exr":
             raise Exception("Filepath needs to end in .exr or .EXR")
         
@@ -306,8 +314,10 @@ class SaveEXRFrames:
         results = list()
         
         linear = images.cpu().numpy().astype(np.float32)
-        if sRGB_to_linear:
+        if tonemap != "linear":
             sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
+        if tonemap == "Reinhard":
+            linear[:,:,:,:3] = -linear[:,:,:,:3] / (linear[:,:,:,:3] - 1)
         
         bgr = linear.copy()
         bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
