@@ -34,6 +34,7 @@ def load_EXR(filepath, tonemap):
         linearToSRGB(rgb)
         rgb = np.clip(rgb, 0, 1)
     elif tonemap == "Reinhard":
+        rgb = np.clip(rgb, 0, None)
         rgb = rgb / (rgb + 1)
         linearToSRGB(rgb)
         rgb = np.clip(rgb, 0, 1)
@@ -215,9 +216,10 @@ class SaveEXR:
         
         linear = images.cpu().numpy().astype(np.float32)
         if tonemap != "linear":
-            sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
+            sRGBtoLinear(linear[...,:3]) # only convert RGB, not Alpha
         if tonemap == "Reinhard":
-            linear[:,:,:,:3] = -linear[:,:,:,:3] / (linear[:,:,:,:3] - 1)
+            linear[...,:3] = np.clip(linear[...,:3], 0, 0.999999)
+            linear[...,:3] = -linear[...,:3] / (linear[...,:3] - 1)
         
         bgr = linear.copy()
         bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
@@ -315,9 +317,10 @@ class SaveEXRFrames:
         
         linear = images.cpu().numpy().astype(np.float32)
         if tonemap != "linear":
-            sRGBtoLinear(linear[:,:,:,:3]) # only convert RGB, not Alpha
+            sRGBtoLinear(linear[...,:3]) # only convert RGB, not Alpha
         if tonemap == "Reinhard":
-            linear[:,:,:,:3] = -linear[:,:,:,:3] / (linear[:,:,:,:3] - 1)
+            linear[...,:3] = np.clip(linear[...,:3], 0, 0.999999)
+            linear[...,:3] = -linear[...,:3] / (linear[...,:3] - 1)
         
         bgr = linear.copy()
         bgr[:,:,:,0] = linear[:,:,:,2] # flip RGB to BGR for opencv
