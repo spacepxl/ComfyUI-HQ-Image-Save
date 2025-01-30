@@ -1,5 +1,6 @@
 import os
-import glob
+import re
+from glob import glob
 from tqdm import tqdm, trange
 import json
 
@@ -79,7 +80,7 @@ class LoadEXR:
             }
         }
 
-    CATEGORY = "image"
+    CATEGORY = "HQ-Image-Save"
 
     RETURN_TYPES = ("IMAGE", "MASK", "INT")
     RETURN_NAMES = ("RGB", "alpha", "batch_size")
@@ -96,9 +97,9 @@ class LoadEXR:
         else:
             rgb = []
             mask = []
-            filelist = sorted(glob.glob(os.path.join(p, "*.exr")))
+            filelist = sorted(glob(os.path.join(p, "*.exr")))
             if not filelist:
-                filelist = sorted(glob.glob(os.path.join(p, "*.EXR")))
+                filelist = sorted(glob(os.path.join(p, "*.EXR")))
                 if not filelist:
                     raise Exception("No EXRs found in folder")
             
@@ -134,7 +135,7 @@ class LoadEXRFrames:
             },
         }
 
-    CATEGORY = "image"
+    CATEGORY = "HQ-Image-Save"
 
     RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT")
     RETURN_NAMES = ("RGB", "alpha", "batch_size", "start_frame")
@@ -206,7 +207,7 @@ class SaveEXR:
 
     OUTPUT_NODE = True
 
-    CATEGORY = "image"
+    CATEGORY = "HQ-Image-Save"
 
     def save_images(self, images, filename_prefix, tonemap, version, start_frame, frame_pad, save_workflow, prompt=None, extra_pnginfo=None):
         useabs = os.path.isabs(filename_prefix)
@@ -302,7 +303,7 @@ class SaveEXRFrames:
 
     OUTPUT_NODE = True
 
-    CATEGORY = "image"
+    CATEGORY = "HQ-Image-Save"
 
     def save_images(self, images, filepath, tonemap, start_frame, overwrite, save_workflow, prompt=None, extra_pnginfo=None):
         if os.path.splitext(os.path.normpath(filepath))[1].lower() != ".exr":
@@ -376,7 +377,7 @@ class SaveTiff:
 
     OUTPUT_NODE = True
 
-    CATEGORY = "image"
+    CATEGORY = "HQ-Image-Save"
 
     def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None):
         import imageio
@@ -412,7 +413,7 @@ class LoadLatentEXR:
             }
         }
 
-    CATEGORY = "latent"
+    CATEGORY = "HQ-Image-Save"
 
     RETURN_TYPES = ("LATENT", "INT")
     RETURN_NAMES = ("samples", "batch_size")
@@ -428,9 +429,9 @@ class LoadLatentEXR:
             batch_size = 1
         else:
             samples = []
-            filelist = sorted(glob.glob(os.path.join(p, "*.exr")))
+            filelist = sorted(glob(os.path.join(p, "*.exr")))
             if not filelist:
-                filelist = sorted(glob.glob(os.path.join(p, "*.EXR")))
+                filelist = sorted(glob(os.path.join(p, "*.EXR")))
                 if not filelist:
                     raise Exception("No EXRs found in folder")
             
@@ -479,7 +480,7 @@ class SaveLatentEXR:
 
     OUTPUT_NODE = True
 
-    CATEGORY = "latent"
+    CATEGORY = "HQ-Image-Save"
 
     def save_images(self, samples, filename_prefix, version, start_frame, frame_pad, prompt=None, extra_pnginfo=None):
         useabs = os.path.isabs(filename_prefix)
@@ -528,6 +529,203 @@ class SaveLatentEXR:
         return { "ui": { "images": results } }
 
 
+class LoadImageAndPrompt:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "filepath": ("STRING", {"default": "path to directory"}),
+                "index": ("INT", {"default": 0}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("image", "prompt", "filename")
+    FUNCTION = "load"
+
+    CATEGORY = "HQ-Image-Save"
+    
+    def load(self, filepath, index):
+        load_pattern = os.path.join(os.path.normpath(filepath), "*.*")
+        all_files = glob(load_pattern)
+        filtered_files = []
+        for file in all_files:
+            ext = os.path.splitext(file)[-1]
+            if ext.lower() in [".jpg", ".jpeg", ".png", ".exr"]:
+                filtered_files.append(file)
+        
+        image_filepath = filtered_files[index]
+        text_filepath = os.path.splitext(image_filepath)[0] + ".txt"
+        
+        with open(text_filepath, "r") as prompt_file:
+            text_prompt = prompt_file.read()
+        
+        image = cv.imread(image_filepath, cv.IMREAD_UNCHANGED)
+        
+        if len(image.shape) == 2:
+            image = np.repeat(image[..., np.newaxis], 3, axis=2)
+        
+        image = cv.cvtColor(image[..., :3], cv.COLOR_BGR2RGB)
+        
+        if image.dtype == np.float32:
+            linearToSRGB(image)
+        elif image.dtype == np.uint8:
+            image = image.astype(np.float32) / 255
+        elif image.dtype == np.uint16:
+            image = image.astype(np.float32) / 65535
+        
+        image = np.clip(image, 0, 1)
+        image = torch.from_numpy(image).unsqueeze(0)
+        
+        return (image, text_prompt, image_filepath)
+
+
+class SaveImageAndPromptExact:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "filepath": ("STRING", {
+                    "default": "absolute filepath",
+                    "tooltip": "The exact filepath to write the image to. Extension should be either .png or .exr, caption will be written to .txt",
+                    }),
+                "png_16bit": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "image": ("IMAGE",),
+                "alpha": ("MASK",),
+                "prompt": ("STRING", {"defaultInput": True}),
+            },
+        }
+
+    RETURN_TYPES = ()
+    OUTPUT_NODE = True
+    FUNCTION = "save"
+    CATEGORY = "HQ-Image-Save"
+    
+    def save(self, filepath, png_16bit, image=None, alpha=None, prompt=None):
+        assert image is not None or prompt is not None, "Must provide at least one of (image, prompt)"
+        
+        image_filepath = os.path.normpath(filepath)
+        prompt_filepath = os.path.splitext(image_filepath)[0] + ".txt"
+        image_ext = os.path.splitext(image_filepath)[-1]
+        if image_ext.lower() in [".jpg", ".jpeg"]:
+            image_filepath = os.path.splitext(image_filepath)[0] + ".png"
+            image_ext = ".png"
+        
+        if image is not None:
+            single_image = image[0].detach().clone()
+            single_image = torch.flip(single_image, dims=[-1]) # BGR
+            
+            if alpha is not None:
+                single_image = torch.cat([single_image, alpha[0].unsqueeze(-1)], dim=-1)
+            
+            single_image = single_image.float().cpu().numpy()
+            
+            if image_ext.lower() == ".png":
+                if png_16bit:
+                    single_image = (single_image * 65535).astype(np.uint16)
+                else:
+                    single_image = (single_image * 255).astype(np.uint8)
+            elif image_ext.lower() == ".exr":
+                sRGBtoLinear(single_image[..., :3])
+            
+            cv.imwrite(image_filepath, single_image)
+        
+        if prompt is not None:
+            with open(prompt_filepath, "w") as prompt_file:
+                prompt_file.write(prompt)
+        
+        return { "ui": { "images": list() } }
+
+
+def get_highest_numbered_file(directory, prefix):
+    pattern = os.path.join(directory, f"{prefix}*")
+    files = glob(pattern)
+    max_num = 0
+    regex = re.compile(r'^' + re.escape(prefix) + r'(\d+).+$')
+    
+    if files:
+        for file_path in files:
+            filename = os.path.basename(file_path)
+            match = regex.match(filename)
+            
+            if not match:
+                continue # Skip files that don't match the expected pattern
+            
+            num_str = match.group(1)
+            num = int(num_str)
+            
+            if num > max_num:
+                max_num = num
+    
+    return max_num
+
+
+class SaveImageAndPromptIncremental:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "filepath": ("STRING", {"default": "folder path", "tooltip": "The folder to write in"}),
+                "filename_prefix": ("STRING", {"default": ""}),
+                "zero_padding": ("INT", {"default": 5}),
+                "image_type": (["png", "png_16bit", "exr"], {"default": "png"}),
+            },
+            "optional": {
+                "image": ("IMAGE",),
+                "alpha": ("MASK",),
+                "prompt": ("STRING", {"defaultInput": True}),
+            },
+        }
+
+    RETURN_TYPES = ()
+    OUTPUT_NODE = True
+    FUNCTION = "save"
+    CATEGORY = "HQ-Image-Save"
+    
+    def save(self, filepath, filename_prefix, zero_padding, image_type, image=None, alpha=None, prompt=None):
+        assert image is not None or prompt is not None, "Must provide at least one of (image, prompt)"
+        
+        counter = get_highest_numbered_file(os.path.normpath(filepath), filename_prefix)
+        batch_size = image.shape[0] if image is not None else 1
+        pbar = ProgressBar(batch_size) if PROGRESS_BAR_ENABLED else None
+        for i in trange(batch_size):
+            counter += 1
+            image_number = str(counter).zfill(zero_padding)
+            file = os.path.join(os.path.normpath(filepath), filename_prefix + image_number)
+            
+            if image is not None:
+                single_image = image[i].detach().clone()
+                single_image = torch.flip(single_image, dims=[-1]) # BGR
+                
+                if alpha is not None:
+                    single_image = torch.cat([single_image, alpha[i].unsqueeze(-1)], dim=-1)
+                
+                single_image = single_image.float().cpu().numpy()
+                
+                if image_type == "exr":
+                    image_file = file + ".exr"
+                    sRGBtoLinear(single_image[..., :3])
+                else:
+                    image_file = file + ".png"
+                    if image_type == "png_16bit":
+                        single_image = (single_image * 65535).astype(np.uint16)
+                    else:
+                        single_image = (single_image * 255).astype(np.uint8)
+                
+                cv.imwrite(image_file, single_image)
+            
+            if prompt is not None:
+                with open(file + ".txt", "w") as prompt_file:
+                    prompt_file.write(prompt)
+            
+            if pbar is not None:
+                pbar.update(1)
+        
+        return { "ui": { "images": list() } }
+
+
 NODE_CLASS_MAPPINGS = {
     "LoadEXR": LoadEXR,
     "LoadEXRFrames": LoadEXRFrames,
@@ -536,6 +734,9 @@ NODE_CLASS_MAPPINGS = {
     "SaveTiff": SaveTiff,
     "LoadLatentEXR": LoadLatentEXR,
     "SaveLatentEXR": SaveLatentEXR,
+    "LoadImageAndPrompt": LoadImageAndPrompt,
+    "SaveImageAndPromptExact": SaveImageAndPromptExact,
+    "SaveImageAndPromptIncremental": SaveImageAndPromptIncremental,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -546,4 +747,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SaveTiff": "Save Tiff",
     "LoadLatentEXR": "Load Latent EXR",
     "SaveLatentEXR": "Save Latent EXR",
+    "LoadImageAndPrompt": "Load Image And Prompt",
+    "SaveImageAndPromptExact": "Save Image And Prompt (exact)",
+    "SaveImageAndPromptIncremental": "Save Image And Prompt (incremental)",
 }
