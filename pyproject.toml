@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-hq-image-save"
+description = "Add Image Save nodes for TIFF 16 bit and EXR 32 bit formats. Probably only useful if you're applying a LUT or other color corrections, and care about preserving as much color accuracy as possible."
+version = "1.0.0"
+license = "LICENSE"
+dependencies = ["imageio"]
+
+[project.urls]
+Repository = "https://github.com/spacepxl/ComfyUI-HQ-Image-Save"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-HQ-Image-Save"
+Icon = ""
